@@ -1,9 +1,12 @@
 import arcade
 import fastf1
 import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.collections import LineCollection
 import matplotlib.cm as cm
 import matplotlib.colors as colors
+from scipy.signal import savgol_filter
 
 # 1. Carregar dados FastF1
 
@@ -44,6 +47,8 @@ s2_end = DISTANCE.max() * 0.66
 s3_end = DISTANCE.max()
 
 
+# normalizar distância
+dist_norm = DISTANCE / DISTANCE.max()
 
 
 X, Y, SPEED, TIME, DISTANCE = interpolate_track(X, Y, SPEED, TIME, DISTANCE)
@@ -68,10 +73,18 @@ best_s1 = laps["Sector1Time"].min()
 best_s2 = laps["Sector2Time"].min()
 best_s3 = laps["Sector3Time"].min()
 
-perfect_lap = best_s1 + best_s2 + best_s3
+ideal_total = best_s1 + best_s2 + best_s3
+ideal_total_sec = ideal_total.total_seconds()
+
+dist_norm = DISTANCE / DISTANCE.max()
+
+# tempo ideal ao longo da pista
+IDEAL_TIME = dist_norm * ideal_total_sec
 
 Z = SPEED * 0.3
 
+opt_x = savgol_filter(X, 51, 3)
+opt_y = savgol_filter(Y, 51, 3)
 
 def format_lap(time):
     total = time.total_seconds()
@@ -110,11 +123,12 @@ class F1Telemetry(arcade.Window):
         self.points = []
 
         # Barra de aceleração
-        self.bar_w = 400
+        self.bar_w = 900
         self.bar_h = 20
         self.bar_x_start = WIDTH // 2 - self.bar_w // 2
         self.bar_y = 60
 
+        
         # Centralização da pista
         cx, cy = (X.max() + X.min()) / 2, (Y.max() + Y.min()) / 2
         for i in range(len(X)):
@@ -122,11 +136,31 @@ class F1Telemetry(arcade.Window):
             ny = ((Y[i] - cy) * SCALE) + HEIGHT / 2
             self.points.append((nx, ny))
 
+        # criar pontos da linha ideal
+        self.opt_points = []
+
+        for i in range(len(opt_x)):
+            nx = ((opt_x[i] - cx) * SCALE) + WIDTH / 2
+            ny = ((opt_y[i] - cy) * SCALE) + HEIGHT / 2
+            self.opt_points.append((nx, ny))
+
+        self.opt_line = arcade.shape_list.ShapeElementList()
+
+        for i in range(1, len(self.opt_points)):
+            p1 = self.opt_points[i-1]
+            p2 = self.opt_points[i]
+
+            color = speed_to_color(SPEED[i])
+
+            self.opt_line.append(
+                arcade.shape_list.create_line(*p1, *p2, color, 4)
+            )
+
         self.track = arcade.shape_list.ShapeElementList()
 
-        self.track.append(arcade.shape_list.create_line_strip(self.points, (15,15,15), 18))
-        self.track.append(arcade.shape_list.create_line_strip(self.points, (60,60,60), 12))
-        self.track.append(arcade.shape_list.create_line_strip(self.points, (120,120,120), 2))
+        self.track.append(arcade.shape_list.create_line_strip(self.points, (0,0,0), 22))
+        self.track.append(arcade.shape_list.create_line_strip(self.points, (230,230,230), 16))
+        self.track.append(arcade.shape_list.create_line_strip(self.points, (100,100,100), 2))
 
         # --- AS CAMADAS QUE ESTAVAM FALTANDO ---
         self.glow_layer = arcade.shape_list.ShapeElementList()
@@ -135,11 +169,13 @@ class F1Telemetry(arcade.Window):
 
         # Criar uma lista para a telemetria colorida
         self.telemetry_lines = arcade.shape_list.ShapeElementList()
-        for i in range(1, len(self.points)):
-            p1 = self.points[i-1]
-            p2 = self.points[i]
+        for i in range(1, len(self.points)-5, 8):
+            p1 = self.points[i]
+            p2 = self.points[i+4]
             color = speed_to_color(SPEED[i])
-
+            self.track.append(
+                arcade.shape_list.create_line(*p1, *p2, (150,150,150), 2)
+            )
             # Camada de Brilho (Glow)
             self.glow_layer.append(
                 arcade.shape_list.create_line(*p1, *p2, (*color[:3], 60), 12)
@@ -159,10 +195,11 @@ class F1Telemetry(arcade.Window):
             self.telemetry_lines.append(line)
         # 3. Barra de aceleração
         self.acc_bar_list = arcade.shape_list.ShapeElementList()
-        steps = 100
+        steps = 300
         for i in range(steps):
             t = i / steps
-            color = (int(255 * (1 - t)), int(255 * t), 0)
+            rgba = cmap(t)
+            color = (int(rgba[0]*255), int(rgba[1]*255), int(rgba[2]*255))
             rect = arcade.shape_list.create_rectangle_filled(
                 self.bar_x_start + (i * self.bar_w / steps),
                 self.bar_y,
@@ -180,7 +217,16 @@ class F1Telemetry(arcade.Window):
         # pista
         self.track.draw()
 
+        self.opt_line.draw()
+
         frame = min(self.current_frame, len(TIME)-1)
+
+        real_time = TIME[self.current_frame]
+
+        # índice do ghost baseado no tempo ideal
+        ghost_idx = np.searchsorted(IDEAL_TIME, real_time)
+
+        ghost_idx = min(ghost_idx, len(self.points) - 1)
 
         # Desenha telemetria acumulada
         if self.current_frame > 1:
@@ -198,6 +244,35 @@ class F1Telemetry(arcade.Window):
             arcade.draw_circle_outline(x, y, 8, (0, 0, 0), 2)
             
         idx = self.current_frame
+        current_time = TIME[self.current_frame]
+
+        delta = real_time - IDEAL_TIME[self.current_frame]
+
+        # Ghost car (piloto ideal)
+        gx, gy = self.points[ghost_idx]
+
+        arcade.draw_circle_filled(
+            gx,
+            gy,
+            6,
+            (0, 255, 255)  # azul/ciano
+        )
+
+        arcade.draw_circle_outline(
+            gx,
+            gy,
+            7,
+            (255, 255, 255),
+            2
+        )
+
+        arcade.draw_text(
+            f"DELTA: {delta:+.3f}s",
+            WIDTH - 300,
+            HEIGHT - 100,
+            arcade.color.YELLOW,
+            14,
+        )
 
         # HUD
         elapsed = TIME[frame]
@@ -252,12 +327,34 @@ class F1Telemetry(arcade.Window):
         )
 
         arcade.draw_text(
-            f"PILO IMP: {format_lap(perfect_lap)}",
+            f"PILO IMP: {format_lap(ideal_total)}",
             WIDTH - 300,
             HEIGHT - 40,
             arcade.color.RED,
             16,
             bold=True
+        )
+
+        arcade.draw_text(
+            "Speed [km/h] (Vermelho=Baixa | Verde=Alta)",
+            WIDTH/2,
+            self.bar_y - 55,
+            arcade.color.WHITE,
+            14,
+            anchor_x="center"
+        )
+        ticks = np.linspace(SPEED.min(), SPEED.max(), 6)
+
+        for i, v in enumerate(ticks):
+            x = self.bar_x_start + (i/(len(ticks)-1)) * self.bar_w
+            
+            arcade.draw_text(
+                f"{int(v)}",
+                x-10,
+                self.bar_y - 30,
+                arcade.color.WHITE,
+                12,
+                anchor_x="center"
         )
 
         # Barra de aceleração
@@ -271,29 +368,6 @@ class F1Telemetry(arcade.Window):
 
         indicator_x = self.bar_x_start + (acc_norm * self.bar_w)
 
-        arcade.shape_list.create_rectangle_filled(
-            center_x=indicator_x,
-            center_y=self.bar_y,
-            width=4,
-            height=30,
-            color=arcade.color.WHITE,
-        )
-
-        arcade.draw_text(
-            "MIN",
-            self.bar_x_start - 60,
-            self.bar_y - 5,
-            arcade.color.RED,
-            10,
-        )
-        arcade.draw_text(
-            "MAX",
-            self.bar_x_start + self.bar_w + 10,
-            self.bar_y - 5,
-            arcade.color.GREEN,
-            10,
-        )
-    # ----------------------------
     def on_update(self, delta_time):
         self.replay_time += delta_time
         # Busca o índice, mas limita ao tamanho máximo do array
