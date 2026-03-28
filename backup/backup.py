@@ -1,255 +1,232 @@
-import arcade
+"""
+Script de Animação de Telemetria F1
+Objetivo: Criar um vídeo (MP4) mostrando a volta de um piloto (Norris) com um rastro 
+colorido baseado na velocidade, comparado ao traçado de referência de outro piloto (Russell).
+Inclui uma visão geral da pista e uma câmera com zoom dinâmico.
+"""
+
 import fastf1
-import matplotlib
 import numpy as np
-import matplotlib.cm as cm
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+import matplotlib.animation as animation
 import matplotlib.colors as colors
+from matplotlib.patches import Rectangle
+from scipy.interpolate import interp1d
 
-# 1. Carregar dados FastF1
-
+# =============================================================================
+# PASSO 1: CARREGAMENTO DE DADOS FASTF1
+# =============================================================================
+# Habilita o cache para não precisar baixar da internet toda vez que rodar
 fastf1.Cache.enable_cache("cache")
-
 print("Carregando telemetria...")
+
+# Baixa a sessão de Qualificação (Q) do GP do Brasil de 2023
 session = fastf1.get_session(2023, "Brazil", "Q")
 session.load()
 
-fastest_lap = session.laps.pick_fastest()
-telemetry = fastest_lap.get_telemetry().add_distance()
+# Seleciona a volta mais rápida de Lando Norris (Carro Principal a ser animado)
+lap_opt = session.laps.pick_driver('NOR').pick_fastest()
+# Seleciona a volta mais rápida de George Russell (Traçado de Referência)
+lap_ref = session.laps.pick_driver('RUS').pick_fastest()
 
-distance = telemetry["Distance"].values
-total_distance = distance.max()
+# Extrai os dados de telemetria (X, Y, Velocidade, Tempo) adicionando a coluna de Distância
+tel_opt = lap_opt.get_telemetry().add_distance()
+tel_ref = lap_ref.get_telemetry().add_distance()
 
-s1_end = total_distance * 0.33
-s2_end = total_distance * 0.66
-s3_end = total_distance
+# Guarda os arrays originais do carro principal (Norris)
+X_orig = tel_opt['X'].values
+Y_orig = tel_opt['Y'].values
+SPEED_orig = tel_opt['Speed'].values
+TIME_orig = tel_opt['Time'].dt.total_seconds().values
 
-def interpolate_track(x, y, speed, time, distance, factor=3):
+# Guarda os arrays originais do carro de referência (Russell)
+X_ref_orig = tel_ref['X'].values
+Y_ref_orig = tel_ref['Y'].values
+DIST_ref_orig = tel_ref['Distance'].values
 
-    t = np.arange(len(x))
-    t_new = np.linspace(0, len(x)-1, len(x)*factor)
+# =============================================================================
+# PASSO 2: INTERPOLAÇÃO (SUAVIZAÇÃO) PARA 60 FPS
+# A telemetria real da F1 é gravada em ~10Hz a ~20Hz (10 a 20 pontos por seg).
+# Para um vídeo fluido a 60 FPS, precisamos criar pontos intermediários (interpolar).
+# =============================================================================
+print("Suavizando traçados...")
 
-    x_i = np.interp(t_new, t, x)
-    y_i = np.interp(t_new, t, y)
-    s_i = np.interp(t_new, t, speed)
-    time_i = np.interp(t_new, t, time)
-    dist_i = np.interp(t_new, t, distance)
+# Remove tempos duplicados (necessário para a função de interpolação matemática funcionar)
+_, idx_opt = np.unique(TIME_orig, return_index=True)
+TIME_orig_u = TIME_orig[idx_opt]
+X_orig_u = X_orig[idx_opt]
+Y_orig_u = Y_orig[idx_opt]
+SPEED_orig_u = SPEED_orig[idx_opt]
+DIST_orig_u = tel_opt['Distance'].values[idx_opt]
 
-    return x_i, y_i, s_i, time_i, dist_i
+# Define a duração total da volta animada e cria um eixo de tempo perfeito a 60 FPS
+# np.linspace cria pontos igualmente espaçados do tempo 0 até o final da volta
+total_time_opt = TIME_orig_u[-1] - TIME_orig_u[0]
+TIME = np.linspace(TIME_orig_u[0], TIME_orig_u[-1], int(total_time_opt * 60))
 
-X = telemetry["X"].values
-Y = telemetry["Y"].values
-SPEED = telemetry["Speed"].values
-TIME = telemetry["Time"].dt.total_seconds().values
-DRIVER = fastest_lap["Driver"]
+# Cria funções matemáticas (interp1d) que adivinham o valor de X, Y e Velocidade 
+# para qualquer fração de segundo
+f_x = interp1d(TIME_orig_u, X_orig_u, kind='cubic')
+f_y = interp1d(TIME_orig_u, Y_orig_u, kind='cubic')
+f_speed = interp1d(TIME_orig_u, SPEED_orig_u, kind='linear')
+f_dist = interp1d(TIME_orig_u, DIST_orig_u, kind='linear')
 
-X, Y, SPEED, TIME, distance = interpolate_track(X, Y, SPEED, TIME, distance)
+# Aplica as funções para gerar os dados do carro em alta resolução (60 FPS)
+X = f_x(TIME)
+Y = f_y(TIME)
+SPEED = f_speed(TIME)
+DIST_OPT = f_dist(TIME)
 
-# 2. Configuração visual
+# Suaviza a linha do carro de referência. Como ele correu em outro tempo, 
+# sincronizamos pela DISTÂNCIA (garante que X e Y de referência fiquem no lugar certo)
+_, idx_ref = np.unique(DIST_ref_orig, return_index=True)
+f_x_ref = interp1d(DIST_ref_orig[idx_ref], X_ref_orig[idx_ref], kind='cubic', fill_value='extrapolate')
+f_y_ref = interp1d(DIST_ref_orig[idx_ref], Y_ref_orig[idx_ref], kind='cubic', fill_value='extrapolate')
 
-WIDTH = 1100
-HEIGHT = 900
-SCALE = 0.07
+X_ref = f_x_ref(DIST_OPT)
+Y_ref = f_y_ref(DIST_OPT)
 
-# Colormap igual matplotlib
-cmap = matplotlib.colormaps["RdYlGn"]
+# =============================================================================
+# PASSO 3: CONFIGURAÇÃO VISUAL (MATPLOTLIB)
+# Configuração da janela, dos eixos e do estilo escuro
+# =============================================================================
+plt.style.use('dark_background')
+# Cria uma figura grande dividida em 1 linha e 2 colunas
+fig, (ax_full, ax_zoom) = plt.subplots(1, 2, figsize=(20, 10))
+
+# Ajusta as margens e a cor de fundo para cinza bem escuro
+fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, wspace=0.05)
+fig.patch.set_facecolor('#111111')
+ax_full.set_facecolor('#111111')
+ax_zoom.set_facecolor('#111111')
+
+# Tira os eixos X e Y (não queremos ver os números das coordenadas)
+ax_full.axis('off')
+ax_zoom.axis('off')
+
+# Desenha a linha fantasma (carro de referência) nos dois gráficos
+ax_full.plot(X_ref_orig, Y_ref_orig, color='#444444', linewidth=2, linestyle='--', zorder=1)
+ax_zoom.plot(X_ref_orig, Y_ref_orig, color='#444444', linewidth=3, linestyle='--', zorder=1)
+
+# Trava os limites do mapa completo para englobar toda a pista
+ax_full.set_xlim(min(X) - 500, max(X) + 500)
+ax_full.set_ylim(min(Y) - 500, max(Y) + 500)
+
+# =============================================================================
+# PASSO 4: PREPARAÇÃO DOS ELEMENTOS ANIMADOS (RASTRO E CARRINHO)
+# =============================================================================
+# Criação das 'LineCollections' - um tipo especial de linha no Matplotlib
+# que permite que cada segmento da linha tenha uma cor diferente (baseada no mapa de cor magma)
+cmap = plt.get_cmap('magma')
 norm = colors.Normalize(vmin=SPEED.min(), vmax=SPEED.max())
 
-laps = session.laps
+# Rastro para o mapa completo
+lc_full = LineCollection([], cmap=cmap, norm=norm, linewidth=4, zorder=2)
+ax_full.add_collection(lc_full)
 
-best_s1 = laps["Sector1Time"].min()
-best_s2 = laps["Sector2Time"].min()
-best_s3 = laps["Sector3Time"].min()
+# Rastro para o mapa com zoom
+lc_zoom = LineCollection([], cmap=cmap, norm=norm, linewidth=6, zorder=2)
+ax_zoom.add_collection(lc_zoom)
 
-perfect_lap = best_s1 + best_s2 + best_s3
+# Criação do 'Carrinho' (Um retângulo)
+car_width, car_length = 200, 400
+# Desenha o carrinho na tela cheia e no zoom
+rect_full = Rectangle((X[0], Y[0]), car_length, car_width, color='cyan', zorder=3)
+rect_zoom = Rectangle((X[0], Y[0]), car_length, car_width, color='cyan', zorder=3)
+ax_full.add_patch(rect_full)
+ax_zoom.add_patch(rect_zoom)
 
-Z = SPEED * 0.3
+# Textos informativos na tela
+time_text = ax_full.text(0.02, 0.95, '', transform=ax_full.transAxes, fontsize=24, color='white')
+speed_text = ax_zoom.text(0.05, 0.05, '', transform=ax_zoom.transAxes, fontsize=32, color='cyan', weight='bold')
 
+# Variáveis de controle para a câmera do Zoom
+zoom_radius = 800
+camera_center = [X[0], Y[0]]
+threshold = 200 # A câmera só move se o carro sair dessa distância do centro
 
-def format_lap(time):
-    total = time.total_seconds()
-    minutes = int(total // 60)
-    seconds = total % 60
-    return f"{minutes}:{seconds:06.3f}"
-
-
-    if dist <= s1_end:
-        return 1
-    elif dist <= s2_end:
-        return 2
+# =============================================================================
+# PASSO 5: FUNÇÃO DE ATUALIZAÇÃO DA ANIMAÇÃO (Roda a cada Frame)
+# =============================================================================
+def update(frame):
+    # Pega as posições atuais até o frame em que estamos
+    current_x = X[:frame+1]
+    current_y = Y[:frame+1]
+    current_speed = SPEED[:frame+1]
+    
+    car_x = X[frame]
+    car_y = Y[frame]
+    
+    # 5.1 CÁLCULO DA ROTAÇÃO DO CARRO
+    # Calcula a direção apontada pelo carro comparando o frame atual com o anterior
+    if frame > 0:
+        dx = X[frame] - X[frame-1]
+        dy = Y[frame] - Y[frame-1]
+        car_angle = np.degrees(np.arctan2(dy, dx))
     else:
-        return 3
-def get_sector(dist):
-    if dist <= s1_end:
-        return 1
-    elif dist <= s2_end:
-        return 2
-    else:
-        return 3
+        car_angle = 0
+        
+    # Ajusta o eixo de rotação do retângulo para que ele gire pelo centro
+    # e não pelo canto inferior esquerdo
+    angle_rad = np.radians(car_angle)
+    cx, cy = car_length / 2, car_width / 2
+    rx = car_x - (cx * np.cos(angle_rad) - cy * np.sin(angle_rad))
+    ry = car_y - (cx * np.sin(angle_rad) + cy * np.cos(angle_rad))
+    
+    # Aplica posição e rotação nos retângulos
+    rect_full.set_xy((rx, ry))
+    rect_full.angle = car_angle
+    rect_zoom.set_xy((rx, ry))
+    rect_zoom.angle = car_angle
+    
+    # 5.2 ATUALIZA O RASTRO COLORIDO ATRÁS DO CARRO
+    if frame > 0:
+        # Pega a lista de pontos e transforma em segmentos de linha (Ponto A -> Ponto B)
+        points = np.array([current_x, current_y]).T.reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        
+        # O rastro recebe a geometria e as cores (velocidade)
+        lc_full.set_segments(segments)
+        lc_full.set_array(current_speed)
+        lc_zoom.set_segments(segments)
+        lc_zoom.set_array(current_speed)
+    
+    # 5.3 LÓGICA DA CÂMERA (MAPA DE ZOOM)
+    # Verifica se o carro andou o suficiente (threshold) para mover a câmera
+    dist_x = abs(car_x - camera_center[0])
+    dist_y = abs(car_y - camera_center[1])
+    
+    if dist_x > threshold or dist_y > threshold:
+        camera_center[0] = car_x
+        camera_center[1] = car_y
+        
+    # Centraliza o eixo de zoom baseado na câmera
+    ax_zoom.set_xlim(camera_center[0] - zoom_radius, camera_center[0] + zoom_radius)
+    ax_zoom.set_ylim(camera_center[1] - zoom_radius, camera_center[1] + zoom_radius)
+    
+    # 5.4 ATUALIZA OS TEXTOS NA TELA
+    total_sec = TIME[frame]
+    mins = int(total_sec // 60)
+    secs = total_sec % 60
+    time_text.set_text(f'L. Norris - Tempo: {mins}:{secs:05.2f}')
+    speed_text.set_text(f'{int(SPEED[frame])} km/h')
+    
+    return lc_full, lc_zoom, rect_full, rect_zoom, time_text, speed_text
 
-def speed_to_color(speed):
+# =============================================================================
+# PASSO 6: EXECUÇÃO DA ANIMAÇÃO E GERAÇÃO DO VÍDEO MP4
+# =============================================================================
+print(f"Gerando animação ({len(TIME)} frames)... Isso pode demorar.")
 
-    rgba = cmap(norm(speed))
+# Cria a animação passando a Figura, a função de update e a quantidade de frames
+ani = animation.FuncAnimation(fig, update, frames=len(TIME), interval=1000/60, blit=True)
 
-    r = int(rgba[0] * 255)
-    g = int(rgba[1] * 255)
-    b = int(rgba[2] * 255)
+# Define o gerador de vídeo (Requer o FFmpeg instalado no seu sistema)
+writer = animation.FFMpegWriter(fps=60, metadata=dict(artist='TelemetryBot'), bitrate=1800)
 
-    return (r, g, b, 255)
-# 3. Classe Arcade
-class F1Telemetry(arcade.Window):
+# Salva o arquivo (essa linha pode demorar vários minutos para processar)
+ani.save('telemetry_lap_smooth.mp4', writer=writer)
 
-    def __init__(self):
-
-        super().__init__(WIDTH, HEIGHT, f"F1 Telemetry Replay - {DRIVER}")
-
-        arcade.set_background_color((30, 30, 30))
-
-        self.current_frame = 0
-        self.replay_time = 0
-        self.points = []
-
-        center_x = (X.max() + X.min()) / 2
-        center_y = (Y.max() + Y.min()) / 2
-
-        for i in range(len(X)):
-
-            nx = ((X[i] - center_x) * SCALE) + WIDTH / 2
-            ny = ((Y[i] - center_y) * SCALE) + HEIGHT / 2
-
-            self.points.append((nx, ny))
-
-        self.track = arcade.shape_list.ShapeElementList()
-
-        self.track.append(arcade.shape_list.create_line_strip(self.points, (15,15,15), 18))
-        self.track.append(arcade.shape_list.create_line_strip(self.points, (60,60,60), 12))
-        self.track.append(arcade.shape_list.create_line_strip(self.points, (120,120,120), 2))
-
-        # --- AS CAMADAS QUE ESTAVAM FALTANDO ---
-        self.glow_layer = arcade.shape_list.ShapeElementList()
-        self.main_layer = arcade.shape_list.ShapeElementList()
-        self.high_layer = arcade.shape_list.ShapeElementList()
-
-        # Criar uma lista para a telemetria colorida
-        self.telemetry_lines = arcade.shape_list.ShapeElementList()
-        for i in range(1, len(self.points)):
-            p1 = self.points[i-1]
-            p2 = self.points[i]
-            color = speed_to_color(SPEED[i])
-
-            # Camada de Brilho (Glow)
-            self.glow_layer.append(
-                arcade.shape_list.create_line(*p1, *p2, (*color[:3], 60), 12)
-            )
-            
-            # Camada Principal
-            self.main_layer.append(
-                arcade.shape_list.create_line(*p1, *p2, color, 6)
-            )
-            
-            # Camada de Highlight
-            self.high_layer.append(
-                arcade.shape_list.create_line(*p1, *p2, (255, 255, 255, 40), 2)
-            )
-
-            line = arcade.shape_list.create_line(*p1, *p2, color, 6)
-            self.telemetry_lines.append(line)
-    # ----------------------------
-
-    def on_draw(self):
-
-        self.clear()
-
-        # pista
-        self.track.draw()
-
-        frame = min(self.current_frame, len(TIME)-1)
-
-        # telemetria
-        if self.current_frame > 1:
-            for layer in [self.glow_layer, self.main_layer, self.high_layer]:
-                for shape in layer[:self.current_frame]:
-                    shape.draw()
-
-        # ghost car
-        if self.current_frame < len(self.points):
-
-            x, y = self.points[self.current_frame]
-
-            arcade.draw_circle_filled(x, y, 8, (255,255,255))
-            arcade.draw_circle_outline(x, y, 8, (30,30,30), 2)
-
-        # HUD
-        elapsed = TIME[frame]
-        arcade.draw_text(
-            f"PILOTO: {DRIVER}",
-            20,
-            HEIGHT - 40,
-            arcade.color.WHITE,
-            16,
-            bold=True,
-        )
-
-        arcade.draw_text(
-            f"TEMPO: {elapsed:.3f}s",
-            20,
-            HEIGHT - 70,
-            arcade.color.WHITE,
-            14,
-        )
-        arcade.draw_text(
-            f"VEL: {SPEED[self.current_frame]:.0f} km/h",
-            20,
-            HEIGHT - 100,
-            arcade.color.WHITE,
-            14,
-        )
-        sector = get_sector(distance[self.current_frame])
-        arcade.draw_text(
-            f"SETOR: S{sector}",
-            20,
-            HEIGHT - 120,
-            arcade.color.YELLOW,
-            14
-        )
-        arcade.draw_text(
-            f"BEST S1: {best_s1}",
-            20, HEIGHT-160,
-            arcade.color.PURPLE, 14
-        )
-
-        arcade.draw_text(
-            f"BEST S2: {best_s2}",
-            20, HEIGHT-180,
-            arcade.color.PURPLE, 14
-        )
-
-        arcade.draw_text(
-            f"BEST S3: {best_s3}",
-            20, HEIGHT-200,
-            arcade.color.PURPLE, 14
-        )
-
-        arcade.draw_text(
-            f"PILO IMP: {format_lap(perfect_lap)}",
-            WIDTH - 300,
-            HEIGHT - 40,
-            arcade.color.RED,
-            16,
-            bold=True
-        )
-    # ----------------------------
-    def on_update(self, delta_time):
-        self.replay_time += delta_time
-        # Busca o índice, mas limita ao tamanho máximo do array
-        self.current_frame = min(np.searchsorted(TIME, self.replay_time), len(self.points) - 1)
-
-        if self.replay_time >= TIME[-1]:
-            self.replay_time = 0
-            self.current_frame = 0
-# ----------------------------
-# 4. Executar
-# ----------------------------
-if __name__ == "__main__":
-
-    app = F1Telemetry()
-    arcade.run()
+print("Vídeo 'telemetry_lap_smooth.mp4' gerado com sucesso!")
