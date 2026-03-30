@@ -3,6 +3,8 @@ import struct
 import pandas as pd
 import time
 import os
+from datetime import datetime
+import glob
 
 UDP_IP = "0.0.0.0"
 UDP_PORT = 20777
@@ -103,8 +105,45 @@ finally:
     print("[FINALIZAÇÃO] Iniciando o processo de salvar o arquivo CSV...")
     if rows:
         df = pd.DataFrame(rows)
-        df.to_csv(CSV_FILENAME, index=False)
-        print(f"[SUCESSO] Arquivo CSV salvo com {len(df)} linhas!")
+        
+        # 1. Pega a data e hora atual no formato Dia-Mes-Ano_Hora-Minuto
+        agora = datetime.now().strftime("%d/%m/%Y_%H:%M")
+        
+        # 2. Descobre o número da sessão contando quantos arquivos já existem
+        arquivos_existentes = glob.glob("telemetria_f1_25_*.csv")
+
+        max_sessao = 0
+        for arquivo in arquivos_existentes:
+            # Pega apenas o nome do arquivo, ignorando caminhos de pastas (ex: C:/pasta/arquivo.csv)
+            nome_arquivo = os.path.basename(arquivo)
+            
+            # Fatiamos o nome usando o "_" como separador. 
+            # Ex: 'telemetria_f125_3_29-03-2026_21-23-36.csv' vira ['telemetria', 'f125', '3', '29-03-2026', '21-23-36.csv']
+            partes = nome_arquivo.split('_')
+            
+            # Garantimos que a lista tem o tamanho mínimo esperado para evitar erro em outros arquivos
+            if len(partes) >= 3:
+                try:
+                    # O número da sessão está na 3ª posição (índice 2)
+                    sessao_atual = int(partes[2])
+                    
+                    # Atualiza qual é o maior número encontrado até agora
+                    if sessao_atual > max_sessao:
+                        max_sessao = sessao_atual
+                except ValueError:
+                    # Se por acaso tiver um texto ali em vez de número, ele ignora
+                    pass
+        
+        # A nova sessão é simplesmente o maior número encontrado + 1
+
+        numero_sessao = max_sessao + 1
+        
+        # 3. Monta o nome final do arquivo dinamicamente
+        novo_nome_csv = f"telemetria_f125_{numero_sessao}_{agora}.csv"
+        
+        # 4. Salva o arquivo com o novo nome
+        df.to_csv(novo_nome_csv, index=False)
+        print(f"[SUCESSO] Arquivo salvo como '{novo_nome_csv}' com {len(df)} linhas!")
     else:
         print("[AVISO] Nenhuma linha foi salva. A lista 'rows' está vazia.")
     
