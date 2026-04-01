@@ -78,7 +78,7 @@ distancia_pista = distancias_por_volta.max() # Considera a maior volta como refe
 
 # Considera como completada a volta que tem pelo menos 95% da distância máxima
 voltas_completadas = distancias_por_volta[distancias_por_volta >= 0.95 * distancia_pista].index.tolist()
-
+   
 # Filtra o dataframe para conter APENAS a última volta completada
 if voltas_completadas:
     ultima_volta = voltas_completadas[-1]

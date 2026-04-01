@@ -3,12 +3,11 @@ import struct
 import pandas as pd
 import time
 import os
-import glob
 from datetime import datetime
-from pathlib import Path
+import glob
 
 UDP_IP = "0.0.0.0"
-UDP_PORT = 20777
+UDP_PORT = 5606
 CSV_FILENAME = "telemetry_session.csv"
 
 print("[INÍCIO] Configurando o Socket...")
@@ -72,15 +71,15 @@ try:
                 print("[PASSO 3] Entrou no IF de MOTION DATA (Posição X, Y, Z)")
                 player_offset = 29 + (player_car_index * 60)
                 
-                pos_x, pos_y, pos_z = struct.unpack_from("<fff", data, player_offset)
-                print(f"   -> Coordenadas extraídas: X={pos_x:.1f}, Z={pos_z:.1f}")
+                #pos_x, pos_y, pos_z = struct.unpack_from("<fff", data, player_offset)
+                #print(f"   -> Coordenadas extraídas: X={pos_x:.1f}, Z={pos_z:.1f}")
                 
                 row = {
                     "session_time": session_time,
                     "lap": car_state["lap"],
-                    "pos_x": pos_x,
-                    "pos_y": pos_y,
-                    "pos_z": pos_z,
+                    #"pos_x": pos_x,
+                    #"pos_y": pos_y,
+                    #"pos_z": pos_z,
                     "speed": car_state["speed"],
                     "throttle": car_state["throttle"],
                     "brake": car_state["brake"]
@@ -109,17 +108,16 @@ finally:
 
         # Define o caminho da pasta onde os arquivos ficarão salvos
         # (Usamos o 'r' antes das aspas para o Python ler as barras corretamente)
-        pasta_destino = r"scr\telemetry\f1-25"
-        
+        pasta_destino = r"f1-telemetry-analyzer\scr\telemetry\ams2"
         
         # Cria a pasta automaticamente caso ela ainda não exista
         os.makedirs(pasta_destino, exist_ok=True)
         
         # 1. Pega a data e hora atual no formato Dia-Mes-Ano_Hora-Minuto
-        agora = datetime.now().strftime("%d-%m-%Y_%H-%M")
+        agora = datetime.now().strftime("%d/%m/%Y_%H:%M")
         
         # 2. Descobre o número da sessão contando quantos arquivos já existem
-        padrao_busca = os.path.join(pasta_destino, "telemetria_f125_*.csv")
+        padrao_busca = os.path.join(pasta_destino, "telemetria_ams2_*.csv")
         arquivos_existentes = glob.glob(padrao_busca)
 
         max_sessao = 0
@@ -149,14 +147,11 @@ finally:
         numero_sessao = max_sessao + 1
         
         # 3. Monta o nome final do arquivo dinamicamente
-        novo_nome_csv = f"telemetria_f125_{numero_sessao}_{agora}.csv"
-
-        # 4. CORREÇÃO: Junta a pasta de destino com o nome do arquivo
-        caminho_completo = Path(pasta_destino) / novo_nome_csv
+        novo_nome_csv = f"telemetria_ams2_{numero_sessao}_{agora}.csv"
         
-       # 5. Salva o arquivo no caminho correto
-        df.to_csv(caminho_completo, index=False)
-        print(f"[SUCESSO] Arquivo salvo como '{caminho_completo}' com {len(df)} linhas!")
+        # 4. Salva o arquivo com o novo nome
+        df.to_csv(novo_nome_csv, index=False)
+        print(f"[SUCESSO] Arquivo salvo como '{novo_nome_csv}' com {len(df)} linhas!")
     else:
         print("[AVISO] Nenhuma linha foi salva. A lista 'rows' está vazia.")
     
