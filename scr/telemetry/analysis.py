@@ -8,8 +8,18 @@ from datetime import datetime
 from pathlib import Path
 
 UDP_IP = "0.0.0.0"
-UDP_PORT = 20777
+PORT_f125 = 20777
+PORT_ams2 = 5606
 CSV_FILENAME = "telemetry_session.csv"
+
+if PORT_f125 == 20777:
+    jogo = "F1-25"
+    UDP_PORT = PORT_f125
+    print("[INÍCIO] Configurando o Socket para F1 2025...")
+elif PORT_ams2 == 5606:
+    jogo = "AMS2"
+    UDP_PORT = PORT_ams2
+    print("[INÍCIO] Configurando o Socket para AMS2...")
 
 print("[INÍCIO] Configurando o Socket...")
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -109,7 +119,10 @@ finally:
 
         # Define o caminho da pasta onde os arquivos ficarão salvos
         # (Usamos o 'r' antes das aspas para o Python ler as barras corretamente)
-        pasta_destino = r"scr\telemetry\f1-25"
+        if UDP_PORT == 20777:
+            pasta_destino = r"scr\telemetry\f1-25"
+        elif UDP_PORT == 20778:
+            pasta_destino = r"scr\telemetry\ams2"
         
         
         # Cria a pasta automaticamente caso ela ainda não exista
@@ -119,7 +132,7 @@ finally:
         agora = datetime.now().strftime("%d-%m-%Y_%H-%M")
         
         # 2. Descobre o número da sessão contando quantos arquivos já existem
-        padrao_busca = os.path.join(pasta_destino, "telemetria_f125_*.csv")
+        padrao_busca = os.path.join(pasta_destino, f"telemetria_{jogo}_*.csv")
         arquivos_existentes = glob.glob(padrao_busca)
 
         max_sessao = 0
@@ -149,7 +162,7 @@ finally:
         numero_sessao = max_sessao + 1
         
         # 3. Monta o nome final do arquivo dinamicamente
-        novo_nome_csv = f"telemetria_f125_{numero_sessao}_{agora}.csv"
+        novo_nome_csv = f"telemetria_{jogo}_{numero_sessao}_{agora}.csv"
 
         # 4. CORREÇÃO: Junta a pasta de destino com o nome do arquivo
         caminho_completo = Path(pasta_destino) / novo_nome_csv
