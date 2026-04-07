@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 def desenhar_pista(pista_interlagos):
     # 1. Carregar os dados
-    pista_interlagos = pd.read_csv(r'/raw/SaoPaulo.csv')
+    pista_interlagos = pd.read_csv(r'data/raw/SaoPaulo.csv')
     pista_interlagos.columns = pista_interlagos.columns.str.strip()  # Limpar possíveis espaços nos nomes das colunas
 
     # Extraindo os dados
@@ -53,7 +53,7 @@ def desenhar_pista(pista_interlagos):
     plt.legend()
 
 
-desenhar_pista(r'/raw/SaoPaulo.csv')
+desenhar_pista('SaoPaulo.csv')
 # 4. Plotando o resultado!
 # Exibe a pista
 plt.show()
