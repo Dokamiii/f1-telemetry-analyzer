@@ -4,11 +4,13 @@ import matplotlib.ticker as mtick
 import os
 import glob
 
+from pistas import desenhar_pista
+
 # ==========================================================
 # 1. CARREGAR OS DADOS (ARQUIVO MAIS RECENTE)
 # ==========================================================
 # Lista todos os arquivos .csv na pasta atual
-arquivos_csv = glob.glob(r'scr\telemetry\f1-25\*.csv')
+arquivos_csv = glob.glob(r'scr\providers\f1-25\*.csv')
 
 # Verifica se existe algum arquivo na pasta para evitar erros
 if not arquivos_csv:
@@ -53,13 +55,26 @@ df['delta_dist'] = df['speed_ms'] * df['delta_time']
 # 4. Acumula a distância para cada volta
 df['lap_distance'] = df.groupby('lap')['delta_dist'].cumsum()
 
+
 # 3. Configurar a figura com 4 subgráficos
 # O gridspec_kw faz com que o mapa da pista (índice 0) seja maior que os gráficos de linha
 fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(14, 14), gridspec_kw={'height_ratios': [2, 1, 1, 1]})
 
+# 1. Chamamos a função. Ela desenha a pista no ax1 E nos entrega onde é o centro dela
+centro_x_pista, centro_z_pista = desenhar_pista(r'data/raw/SaoPaulo.csv', ax1)
+
+# 2. Calculamos o centro da sua telemetria (lembrando do sinal negativo no Z para manter a rotação que já descobrimos!)
+centro_x_telemetria = df['pos_x'].mean()
+centro_z_telemetria = (-df['pos_z']).mean()
+
+# 3. O ajuste dinâmico: a distância exata entre o centro da pista e o centro da telemetria
+ajuste_x = (centro_x_pista - centro_x_telemetria) - 13
+ajuste_z = (centro_z_pista - centro_z_telemetria) + 30
+
+# 4. Desenhamos a linha do carro já com a rotação (-) e com o deslocamento automático (+)
+ax1.plot(df['pos_x'] + ajuste_x, -df['pos_z'] + ajuste_z, color='black', linewidth=1.5)
 # --- GRÁFICO 1: MAPA DA PISTA ---
 # Usando o df_mapa, que não tem os "rabiscos" de entrada/saída de box
-ax1.plot(df['pos_x'], df['pos_z'], color='black', linewidth=1.5)
 ax1.set_title('Mapa da Pista (Apenas Voltas Válidas)', fontsize=14, fontweight='bold')
 ax1.set_ylabel('Posição Z')
 ax1.axis('equal') # Mantém a proporção real da pista

@@ -23,7 +23,7 @@ from scipy.signal import savgol_filter
 # ==========================================
 
 # Ativa o cache para evitar o download repetido de dados pesados da API do FastF1
-fastf1.Cache.enable_cache("cache")
+fastf1.Cache.enable_cache(r"data/cache")
 
 print("Carregando telemetria...")
 # Carrega a sessão de Qualificação (Q) do GP do Brasil de 2023

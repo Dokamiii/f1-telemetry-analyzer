@@ -10,7 +10,7 @@ import math
 # =============================================================================
 # 1. CARREGAMENTO DE DADOS FASTF1
 # =============================================================================
-fastf1.Cache.enable_cache("cache")
+fastf1.Cache.enable_cache(r"data/cache")
 
 def obter_telemetria_fastf1(ano, gp, tipo_sessao='Q', piloto='NOR'):
     print(f"Baixando telemetria: {ano} {gp} ({tipo_sessao}) - Piloto {piloto}...")
