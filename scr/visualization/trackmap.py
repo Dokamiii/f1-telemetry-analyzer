@@ -1,145 +1,108 @@
-import dash
-from dash import dcc, html, Input, Output
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import pandas as pd
+import arcade
 import numpy as np
-import fastf1
-import os
 
-# --- 1. Configuração do Cache do FastF1 ---
-if not os.path.exists(r'data/cache'):
-    os.makedirs(r'data/cache')
-fastf1.Cache.enable_cache(r'data/cache')
+# --- CLASSE FRONTEND (ARCADE) ---
 
-# --- 2. Obter Telemetria Real da Fórmula 1 ---
-def obter_telemetria(ano, gp, tipo_sessao='R'):
-    print(f"Carregando dados: {ano} {gp}...")
-    sessao = fastf1.get_session(ano, gp, tipo_sessao)
-    sessao.load(telemetry=True, weather=False, messages=False)
+class ArcadeTrackView(arcade.Window):
+    def __init__(self, largura, altura, titulo, x_pista, y_pista, x_tele, y_tele):
+        super().__init__(largura, altura, titulo)
+        arcade.set_background_color(arcade.color.BLACK) # Fundo estilo Arcade
+        
+        # 1. Armazenar Dados vindos do Backend (Loader)
+        self.x_pista = x_pista
+        self.y_pista = y_pista
+        self.x_tele = x_tele
+        self.y_tele = y_tele
+
+        # 2. Configuração do Carro (Ponto Roxa)
+        self.indice_carro = 0
+        self.velocidade_animacao = 3  # Quantos pontos pular por frame (ajuste aqui)
+        
+        # 3. Lógica de Escala e Centralização (Automática)
+        # Encontra os limites totais combinando pista e telemetria
+        todos_x = self.x_pista + self.x_tele
+        todos_y = self.y_pista + self.y_tele
+        
+        self.min_x, self.max_x = min(todos_x), max(todos_x)
+        self.min_y, self.max_y = min(todos_y), max(todos_y)
+        
+        largura_real = self.max_x - self.min_x
+        altura_real = self.max_y - self.min_y
+        
+        # Define a escala para ocupar 85% da tela
+        margem = 0.85
+        self.escala = min(largura * margem / largura_real, altura * margem / altura_real)
+        
+        # Offsets para centralizar o desenho na janela
+        self.offset_x = (largura - largura_real * self.escala) / 2
+        self.offset_y = (altura - altura_real * self.escala) / 2
+
+    def transformar(self, x, y):
+        """ Converte coordenadas de Metros (Backend) para Pixels (Arcade) """
+        px = (x - self.min_x) * self.escala + self.offset_x
+        py = (y - self.min_y) * self.escala + self.offset_y
+        return px, py
+
+    def on_update(self, delta_time):
+        """ Lógica de movimentação do ponto roxo """
+        self.indice_carro += self.velocidade_animacao
+        if self.indice_carro >= len(self.x_tele):
+            self.indice_carro = 0  # Reinicia a volta (Loop)
+
+    def on_draw(self):
+        """ Loop de Renderização Visual """
+        self.clear()
+        
+        # --- DESENHAR PISTA AMARELA (BACKGROUND) ---
+        # Transformamos os metros em pixels para o Arcade
+        pontos_pista = [self.transformar(x, y) for x, y in zip(self.x_pista, self.y_pista)]
+        
+        # Desenha a linha da pista (Amarela Neon)
+        if len(pontos_pista) > 1:
+            arcade.draw_line_strip(pontos_pista, arcade.color.FLUORESCENT_YELLOW, 2)
+
+        # --- DESENHAR CARRO (PONTO ROXO) ---
+        if self.indice_carro < len(self.x_tele):
+            cx_m = self.x_tele[self.indice_carro]
+            cy_m = self.y_tele[self.indice_carro]
+            cx, cy = self.transformar(cx_m, cy_m)
+            
+            # Efeito de Brilho (Glow)
+            arcade.draw_circle_filled(cx, cy, 10, (147, 112, 219, 80)) # Brilho externo
+            arcade.draw_circle_filled(cx, cy, 5, arcade.color.PURPLE)     # Centro sólido
+
+# --- INTEGRAÇÃO COM O SEU PROJETO (BACKEND) ---
+def iniciar_arcade(df_telemetria, x_pista, y_pista, ajuste_x, ajuste_z):
+    """
+    Função para preparar os dados e abrir a janela Arcade.
+    Aceita df_telemetria como DataFrame ou como uma lista simples para testes.
+    """
+    # 1. Preparar dados da Pista Amarela
+    x_pista_lista = list(x_pista)
+    y_pista_lista = list(y_pista)
     
-    volta_rapida = sessao.laps.pick_fastest()
-    tel = volta_rapida.get_telemetry()
-    tel['Driver'] = volta_rapida['Driver']
-    return tel
+    # 2. Preparar dados da Telemetria (Jogador)
+    # Se df_telemetria for um DataFrame do Pandas (Projeto Real)
+    if hasattr(df_telemetria, 'get'): 
+        x_jogador = (df_telemetria['pos_x'] + ajuste_x).tolist()
+        z_jogador = (-df_telemetria['pos_z'] + ajuste_z).tolist()
+    else:
+        # Se for apenas um teste com listas (Exemplo básico)
+        x_jogador = [x + ajuste_x for x in x_pista_lista]
+        z_jogador = [y + ajuste_z for y in y_pista_lista]
 
-tel_ref = obter_telemetria(2018, 'Brazil', 'R')  
-tel_cur = obter_telemetria(2024, 'Brazil', 'R')  
+    # 3. Criar e rodar a janela
+    janela = ArcadeTrackView(1200, 800, "F1 Telemetry Arcade", 
+                             x_pista_lista, y_pista_lista, 
+                             x_jogador, z_jogador)
+    arcade.run()
 
-# --- 3. Criar Fundo da Pista Perfeito via Telemetria ---
-def gerar_fundo_pista_plotly(telemetria, largura_metros=10.0):
-    x = telemetria['X'].values
-    y = telemetria['Y'].values
+# --- ÁREA DE TESTE (Roda apenas se você clicar "Play" neste arquivo) ---
+if __name__ == "__main__":
+    # Criando um quadrado de teste para garantir que o código abre
+    teste_x = [100, 500, 500, 100, 100]
+    teste_y = [100, 100, 500, 500, 100]
     
-    dx = np.gradient(x)
-    dy = np.gradient(y)
-    norm = np.sqrt(dx**2 + dy**2)
-    norm[norm == 0] = 1 
-    
-    nx = -dy / norm
-    ny = dx / norm
-    
-    left_x = x + nx * largura_metros
-    left_y = y + ny * largura_metros
-    right_x = x - nx * largura_metros
-    right_y = y - ny * largura_metros
-    
-    fig = go.Figure()
-
-    # Preenchimento do asfalto (Unindo borda esquerda com direita invertida)
-    x_asfalto = np.concatenate([left_x, right_x[::-1], [left_x[0]]])
-    y_asfalto = np.concatenate([left_y, right_y[::-1], [left_y[0]]])
-
-    fig.add_trace(go.Scatter(
-        x=x_asfalto, y=y_asfalto,
-        fill='toself', 
-        fillcolor='rgba(100, 100, 100, 0.4)', # Cinza estilo asfalto
-        line=dict(color='rgba(255,255,255,0)'), 
-        name='Asfalto',
-        hoverinfo='skip'
-    ))
-
-    # Bordas Brancas
-    fig.add_trace(go.Scatter(x=left_x, y=left_y, mode='lines', line=dict(color='white', width=2), name='Limite Esq.'))
-    fig.add_trace(go.Scatter(x=right_x, y=right_y, mode='lines', line=dict(color='white', width=2), name='Limite Dir.'))
-    # Linha Central
-    fig.add_trace(go.Scatter(x=x, y=y, mode='lines', line=dict(color='yellow', width=1, dash='dash'), name='Centro'))
-
-    return fig
-
-# Gera o mapa base usando o carro mais recente como âncora
-fig_mapa_base = gerar_fundo_pista_plotly(tel_cur, largura_metros=8.0)
-
-# --- 4. Inicialização do Dashboard Dash ---
-app = dash.Dash(__name__)
-max_dist = int(max(tel_ref['Distance'].max(), tel_cur['Distance'].max()))
-
-app.layout = html.Div([
-    html.H1("🏎️ Sistema de Telemetria F1", style={'textAlign': 'center', 'color': '#f4f4f4', 'fontFamily': 'Arial'}),
-    
-    html.Div([
-        html.Label("Posição na Pista (Distância em Metros):", style={'color': 'white', 'fontWeight': 'bold'}),
-        dcc.Slider(
-            id='distance-slider',
-            min=0, max=max_dist, step=5, value=0,
-            marks={i: f'{i}m' for i in range(0, max_dist, 500)},
-            tooltip={"placement": "bottom", "always_visible": True}
-        )
-    ], style={'padding': '20px', 'backgroundColor': '#2a2a2a', 'borderRadius': '10px', 'marginBottom': '20px'}),
-
-    html.Div([
-        html.Div([dcc.Graph(id='track-map', style={'height': '800px'})], style={'width': '40%', 'display': 'inline-block', 'verticalAlign': 'top'}),
-        html.Div([dcc.Graph(id='telemetry-graphs')], style={'width': '60%', 'display': 'inline-block', 'verticalAlign': 'top'})
-    ])
-], style={'backgroundColor': '#121212', 'padding': '20px'})
-
-# --- 5. Lógica de Atualização ---
-@app.callback(
-    [Output('track-map', 'figure'), Output('telemetry-graphs', 'figure')],
-    [Input('distance-slider', 'value')]
-)
-def update_dashboard(current_distance):
-    idx_ref = (tel_ref['Distance'] - current_distance).abs().idxmin()
-    idx_cur = (tel_cur['Distance'] - current_distance).abs().idxmin()
-
-    # MAPA DA PISTA
-    fig_map = go.Figure(fig_mapa_base)
-
-    # Nota: A telemetria de 2018 e 2024 terão origens X/Y diferentes por padrão do FastF1. 
-    # Para o mapa ficar legível, vamos focar no carro atual (Ciano).
-    fig_map.add_trace(go.Scatter(x=tel_cur['X'], y=tel_cur['Y'], mode='lines', line=dict(color='cyan', width=2), name=f"Atual ({tel_cur['Driver'].iloc[0]})"))
-
-    # Marcador Dinâmico
-    fig_map.add_trace(go.Scatter(
-        x=[tel_cur['X'].iloc[idx_cur]],
-        y=[tel_cur['Y'].iloc[idx_cur]],
-        mode='markers',
-        marker=dict(size=14, color='cyan', line=dict(color='white', width=2)),
-        name='Posição'
-    ))
-
-    fig_map.update_layout(
-        plot_bgcolor='#1e1e1e', paper_bgcolor='#121212', font=dict(color='white'),
-        xaxis=dict(showgrid=False, zeroline=False, scaleanchor="y", scaleratio=1, visible=False),
-        yaxis=dict(showgrid=False, zeroline=False, visible=False),
-        margin=dict(l=10, r=10, t=40, b=10),
-        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01, bgcolor="rgba(0,0,0,0.5)")
-    )
-
-    # GRÁFICOS DE TELEMETRIA (Mantém os dois carros comparados aqui)
-    fig_graphs = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.04, 
-                               subplot_titles=("Velocidade (km/h)", "Acelerador (%)", "Freio", "RPM"))
-
-    for i, metric in enumerate(['Speed', 'Throttle', 'Brake', 'RPM']):
-        fig_graphs.add_trace(go.Scatter(x=tel_ref['Distance'], y=tel_ref[metric], mode='lines', line=dict(color='red', width=1.5), name=f"Ref" if i==0 else "", showlegend=(i==0)), row=i+1, col=1)
-        fig_graphs.add_trace(go.Scatter(x=tel_cur['Distance'], y=tel_cur[metric], mode='lines', line=dict(color='cyan', width=1.5), name=f"Atual" if i==0 else "", showlegend=(i==0)), row=i+1, col=1)
-        fig_graphs.add_vline(x=current_distance, line_width=2, line_dash="dash", line_color="yellow", row=i+1, col=1)
-
-    fig_graphs.update_layout(height=800, plot_bgcolor='#1e1e1e', paper_bgcolor='#121212', font=dict(color='white'), margin=dict(l=40, r=20, t=40, b=20), hovermode="x unified")
-    fig_graphs.update_xaxes(showgrid=True, gridcolor='#333')
-    fig_graphs.update_yaxes(showgrid=True, gridcolor='#333')
-
-    return fig_map, fig_graphs
-
-if __name__ == '__main__':
-    app.run(debug=True)
+    print("Iniciando modo de teste Arcade...")
+    # Enviamos None no DF, mas agora a função sabe lidar com isso
+    iniciar_arcade(None, teste_x, teste_y, 0, 0)
