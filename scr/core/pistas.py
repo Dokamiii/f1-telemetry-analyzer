@@ -62,7 +62,39 @@ def desenhar_pista(pista_interlagos, eixo_recebido):
 
     return centro_x_pista, centro_y_pista
 
+def obter_coordenadas_pista(caminho_ficheiro):
+    """Lê o ficheiro da pista e devolve as coordenadas matemáticas das bordas para o Arcade."""
+    pista_interlagos = pd.read_csv(caminho_ficheiro)
+    pista_interlagos.columns = pista_interlagos.columns.str.strip()
+
+    x = pista_interlagos['# x_m'].values
+    y = pista_interlagos['y_m'].values
+    w_right = pista_interlagos['w_tr_right_m'].values
+    w_left = pista_interlagos['w_tr_left_m'].values
+
+    dx = np.gradient(x)
+    dy = np.gradient(y)
+    norm = np.hypot(dx, dy)
+    norm[norm == 0] = 1
+
+    nx = -dy / norm
+    ny = dx / norm
+
+    fator_largura = 2.0
+    x_left = x + nx * (w_left * fator_largura)
+    y_left = y + ny * (w_left * fator_largura)
+    x_right = x - nx * (w_right * fator_largura)
+    y_right = y - ny * (w_right * fator_largura)
+
+    return {
+        "centro_x": x.tolist(), "centro_y": y.tolist(),
+        "esquerda_x": x_left.tolist(), "esquerda_y": y_left.tolist(),
+        "direita_x": x_right.tolist(), "direita_y": y_right.tolist()
+    }
+
 if __name__ == '__main__':
-    # Only runs if pistas.py is executed directly
-    desenhar_pista(r'data/raw/pistas.csv', ax1)
+    # Bloco de teste corrigido com criação de uma figura genérica
+    fig, ax = plt.subplots()
+    desenhar_pista(r'data/raw/SaoPaulo.csv', ax)
+    plt.axis('equal')
     plt.show()
