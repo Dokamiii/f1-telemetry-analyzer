@@ -4,10 +4,11 @@ import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+from pistas import desenhar_pista
 
 
 
-fastf1.Cache.enable_cache("cache")
+fastf1.Cache.enable_cache(r"scr\providers\cache")
 print("Carregando dados da sessão...")
 
 session = fastf1.get_session(2023, "Brazil", "Q")
@@ -75,7 +76,6 @@ for _, corner in circuit_info.corners.iterrows():
     plt.text(text_x, text_y, txt,
             va='center_baseline', ha='center', size='small', color='white')
 
-desenhar_pista('SaoPaulo.csv')
 
 plt.title(session.event['Location'])
 plt.xticks([])

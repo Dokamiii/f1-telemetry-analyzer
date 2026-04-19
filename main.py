@@ -23,7 +23,7 @@ def obter_telemetria_fastf1(ano, gp, tipo_sessao='Q', piloto='NOR'):
 # =============================================================================
 # 2. CONVERSÃO MATEMÁTICA: METROS (X,Y) PARA GPS (LAT, LON)
 # =============================================================================
-def converter_xy_para_latlon(df_tel, lat_centro, lon_centro, rotacao_graus=0):
+def converter_xy_para_latlon(df_tel, lat_centro, lon_cent ro, rotacao_graus=0):
     METROS_POR_GRAU = 111320.0
     x = df_tel['X'].values
     y = df_tel['Y'].values
