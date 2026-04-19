@@ -84,7 +84,7 @@ centro_x_pista, centro_z_pista = desenhar_pista(r'data/raw/SaoPaulo.csv', ax1)
 centro_x_telemetria = df_plot['pos_x'].mean()
 centro_z_telemetria = (-df_plot['pos_z']).mean()
 ajuste_x = (centro_x_pista - centro_x_telemetria) - 13
-ajuste_z = (centro_z_pista - centro_z_telemetria) + 30
+ajuste_z = (centro_z_pista - centro_z_telemetria) + 18
 
 color_speed, color_throttle, color_brake = '#1f77b4', '#2ca02c', '#d62728'
 
