@@ -15,8 +15,8 @@ from core.trackmap import TrackMapGenerator
 from core.telemetry import TelemetryProcessor
 from core.raceline_ai import RacelineAI
 from core.udp_capture import UDPTelemetryCapture
-# NOVO: Importando o módulo de track limits
 from core.tracklimits import TrackLimitsValidator, validate_lap_track_limits
+from core.trajectory import TrajectoryAI
 
 # Configurar logging
 logging.basicConfig(
@@ -112,15 +112,35 @@ def load_example_data():
             else:
                 logger.warning(f"❌ Track Limits: {track_limits_result['reason']}")
             
-            # 4. Gerar raceline IA
+            # 4. Gerar raceline IA (ALTERAÇÃO AQUI: Integrando as duas IAs)
             logger.info("Gerando raceline IA...")
-            ai_engine = RacelineAI(app_state["track_data"])
-            ai_raceline = ai_engine.generate_optimal_raceline(telemetry_data)
-            app_state["ai_raceline"] = ai_raceline
+            
+            # A. Física base
+            ai_physics = RacelineAI(app_state["track_data"]).generate_optimal_raceline(telemetry_data)
+            
+            # B. Nova Trajetória de Aprendizado
+            ai_learning_engine = TrajectoryAI(app_state["track_data"], n_segments=40)
+            ai_learning_engine.fit(telemetry_data)
+            ai_learning = ai_learning_engine.recommend()
+            
+            # C. Adaptador
+            ai_raceline_adaptada = {
+                "trajectory": {
+                    "x": ai_learning["trajectory"]["x"],
+                    "z": ai_learning["trajectory"]["z"],
+                    "distance": ai_physics["trajectory"].get("distance", [])
+                },
+                "speed": ai_physics["speed"], 
+                "estimated_time": telemetry_data["best_lap_time"] - ai_learning["estimated_gain_seconds"],
+                "insights": ai_learning["notes"],
+                "segment_scores": ai_learning["segment_loss"]
+            }
+
+            app_state["ai_raceline"] = ai_raceline_adaptada
             
             logger.info(f"✅ Raceline IA gerada")
-            logger.info(f"   - Tempo IA: {ai_raceline['estimated_time']:.3f}s")
-            logger.info(f"   - Ganho potencial: {telemetry_data['best_lap_time'] - ai_raceline['estimated_time']:.3f}s")
+            logger.info(f"   - Tempo IA: {ai_raceline_adaptada['estimated_time']:.3f}s")
+            logger.info(f"   - Ganho potencial: {ai_learning['estimated_gain_seconds']:.3f}s")
             
             logger.info("=" * 60)
             logger.info("DADOS DE EXEMPLO PRONTOS PARA USO!")
@@ -239,16 +259,33 @@ async def upload_telemetry(file: UploadFile = File(...)):
         track_limits_result = validate_lap_track_limits(lap_data_for_validation, app_state["track_data"])
         logger.info(f"Track limits validado: Válido={track_limits_result['valid']}")
         
-        # Gerar raceline IA
-        logger.info("Gerando raceline IA...")
-        ai_engine = RacelineAI(app_state["track_data"])
-        ai_raceline = ai_engine.generate_optimal_raceline(telemetry_data)
+        # Gerar raceline IA (ALTERAÇÃO AQUI: Integrando as duas IAs)
+        logger.info("Gerando raceline IA combinada...")
+        
+        ai_physics = RacelineAI(app_state["track_data"]).generate_optimal_raceline(telemetry_data)
+        
+        ai_learning_engine = TrajectoryAI(app_state["track_data"], n_segments=40)
+        ai_learning_engine.fit(telemetry_data)
+        ai_learning = ai_learning_engine.recommend()
+        
+        ai_raceline_adaptada = {
+            "trajectory": {
+                "x": ai_learning["trajectory"]["x"],
+                "z": ai_learning["trajectory"]["z"],
+                "distance": ai_physics["trajectory"].get("distance", [])
+            },
+            "speed": ai_physics["speed"], 
+            "estimated_time": telemetry_data["best_lap_time"] - ai_learning["estimated_gain_seconds"],
+            "insights": ai_learning["notes"],
+            "segment_scores": ai_learning["segment_loss"]
+        }
+        
         logger.info("Raceline IA gerada com sucesso")
         
         # Salvar no state
         app_state["telemetry_data"] = telemetry_data
-        app_state["ai_raceline"] = ai_raceline
-        app_state["track_limits"] = track_limits_result # Salvar validação
+        app_state["track_limits"] = track_limits_result
+        app_state["ai_raceline"] = ai_raceline_adaptada
         
         return {
             "status": "success",
@@ -257,11 +294,11 @@ async def upload_telemetry(file: UploadFile = File(...)):
                 "total_laps": telemetry_data["total_laps"],
                 "best_lap": telemetry_data["best_lap_number"],
                 "player_time": telemetry_data["best_lap_time"],
-                "ai_time": ai_raceline["estimated_time"],
-                "time_gain": telemetry_data["best_lap_time"] - ai_raceline["estimated_time"],
-                "track_limits_valid": track_limits_result["valid"], # NOVO
-                "track_limits_reason": track_limits_result["reason"], # NOVO
-                "insights": ai_raceline["insights"]
+                "ai_time": ai_raceline_adaptada["estimated_time"],
+                "time_gain": telemetry_data["best_lap_time"] - ai_raceline_adaptada["estimated_time"],
+                "track_limits_valid": track_limits_result["valid"],
+                "track_limits_reason": track_limits_result["reason"],
+                "insights": ai_raceline_adaptada["insights"]
             }
         }
         
@@ -392,6 +429,19 @@ async def get_capture_status():
         }
     
     return app_state["udp_capture"].get_status()
+
+
+@app.post("/api/ai/recommend")
+async def ai_recommend():
+    if app_state["track_data"] is None:
+        raise HTTPException(status_code=400, detail="Track não carregado")
+    if app_state["telemetry_data"] is None:
+        raise HTTPException(status_code=400, detail="Telemetria não carregada")
+
+    ai = TrajectoryAI(app_state["track_data"], n_segments=40)
+    ai.fit(app_state["telemetry_data"])
+    result = ai.recommend()
+    return {"status": "success", "data": result}
 
 
 if __name__ == "__main__":
